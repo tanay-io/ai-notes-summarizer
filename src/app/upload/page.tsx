@@ -72,7 +72,8 @@ const generationOptions = [
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [generatedContent, setGeneratedContent] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // For generation process
+  const [isSaving, setIsSaving] = useState(false); // For saving content
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -129,7 +130,7 @@ export default function UploadPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) {
-      setError("Please select a file to upload");
+      setError("Please select a file to upload.");
       return;
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -146,7 +147,7 @@ export default function UploadPage() {
     setCurrentGenerationId(null);
     setUploadProgress(0);
 
-    // Simulate progress
+    // Simulate progress while waiting for the real API call
     const progressInterval = setInterval(() => {
       setUploadProgress((prev) => {
         if (prev >= 90) {
@@ -162,22 +163,46 @@ export default function UploadPage() {
       formData.append("file", file);
       formData.append("generationType", generationType);
 
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      // --- ACTUAL API CALL TO /api/upload ---
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
 
-      // Mock successful response
-      const mockContent = `Generated ${generationType} content for ${file.name}:\n\nThis is a sample generated content that would normally come from your AI processing. The content would be tailored based on the selected generation type and the uploaded file content.`;
+      // Stop progress simulation
+      clearInterval(progressInterval);
+      setUploadProgress(100); // Set to 100% after API response
 
-      setGeneratedContent(mockContent);
-      setCurrentGenerationId("mock-id-" + Date.now());
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Handle API errors (e.g., 4xx, 5xx status codes)
+        const errorMessage = data.message || data.error || "An unknown error occurred.";
+        setError(errorMessage);
+        setSuccess(null);
+        setGeneratedContent(""); // Clear any previous content on error
+        setCurrentGenerationId(null); // Clear ID on error
+        // Important: If it's a token limit error, display it explicitly
+        if (errorMessage.includes("too many attempts") || errorMessage.includes("RESOURCE_EXHAUSTED")) {
+            setError(`AI Generation Failed: ${errorMessage}. This usually means the content extracted from your file was too large for the free AI token limit, or you've hit your daily request quota. Please try a smaller file or wait a few hours.`);
+        }
+        return; // Exit if there's an error
+      }
+
+      // Success case
+      setGeneratedContent(data.generatedContent);
+      setCurrentGenerationId(data.id); // Assuming your API returns an 'id' for the saved generation
       setShowNameInput(true);
-      setUploadProgress(100);
-      setSuccess("Content generated successfully!");
+      setSuccess(data.message || "Content generated successfully!");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      clearInterval(progressInterval); // Ensure interval is cleared on network errors too
+      setUploadProgress(0); // Reset progress on severe error
+      setError(err instanceof Error ? err.message : "A network error occurred. Please check your internet connection.");
+      setGeneratedContent("");
+      setCurrentGenerationId(null);
+      setSuccess(null);
     } finally {
       setIsLoading(false);
-      clearInterval(progressInterval);
     }
   };
 
@@ -187,16 +212,39 @@ export default function UploadPage() {
       return;
     }
 
-    try {
-      // Simulate save API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    setIsSaving(true); // Set saving state
+    setError(null);
+    setSuccess(null);
 
+    try {
+      // --- ACTUAL API CALL TO /api/save-generation ---
+      const response = await fetch("/api/save-generation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id: currentGenerationId, name: userGivenName }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMessage = data.message || data.error || "Failed to save content.";
+        setError(errorMessage);
+        setSuccess(null);
+        return;
+      }
+
+      // Success case
       setShowNameInput(false);
       setUserGivenName("");
-      setCurrentGenerationId(null);
-      setSuccess("Content saved successfully!");
+      setCurrentGenerationId(null); // Clear ID after saving name
+      setSuccess(data.message || "Content saved successfully!");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save name");
+      setError(err instanceof Error ? err.message : "A network error occurred while saving.");
+      setSuccess(null);
+    } finally {
+      setIsSaving(false); // Reset saving state
     }
   };
 
@@ -521,12 +569,14 @@ export default function UploadPage() {
                                 placeholder='e.g., "Summary of Q2 Report"'
                                 className="flex-1 border-blue-200 dark:border-blue-700 focus:border-blue-500 focus:ring-blue-500 rounded-xl"
                               />
+                              {/* Use new isSaving state */}
                               <Button
                                 onClick={handleSaveName}
-                                disabled={isLoading}
+                                disabled={isSaving}
                                 className="bg-blue-600 hover:bg-blue-700 text-white px-8 rounded-xl"
                               >
-                                {isLoading ? (
+                                {/* Use new isSaving state */}
+                                {isSaving ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
                                   "Save"
