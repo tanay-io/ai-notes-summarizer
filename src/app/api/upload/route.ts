@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import pdf from "pdf-parse";
 import mammoth from "mammoth";
 import { createWorker } from "tesseract.js";
 import { put } from "@vercel/blob";
@@ -9,13 +8,49 @@ import { connectToDatabase } from "@/lib/mongodb";
 import Generation, { GenerationType } from "@/models/generation";
 
 async function parsePdf(fileBuffer: Buffer): Promise<string> {
-  const data = await pdf(fileBuffer);
-  return data.text;
+  try {
+    const pdfParse = await import("pdf-parse");
+    const data = await pdfParse.default(fileBuffer);
+    return data.text;
+  } catch (error) {
+    console.error("Error parsing PDF with pdf-parse:", error);
+
+    try {
+      const textContent = await extractPdfTextFallback(fileBuffer);
+      return textContent;
+    } catch (fallbackError) {
+      console.error("Fallback PDF parsing also failed:", fallbackError);
+      throw new Error(
+        "Failed to parse PDF file. Please ensure it contains selectable text or try uploading as images."
+      );
+    }
+  }
+}
+
+async function extractPdfTextFallback(fileBuffer: Buffer): Promise<string> {
+  
+  const text = fileBuffer.toString("utf8");
+
+  const cleanedText = text
+    .replace(/[^\x20-\x7E\n\r\t]/g, " ") 
+    .replace(/\s+/g, " ") 
+    .trim();
+
+  if (cleanedText.length < 50) {
+    throw new Error("Could not extract meaningful text from PDF");
+  }
+
+  return cleanedText;
 }
 
 async function parseDocx(fileBuffer: Buffer): Promise<string> {
-  const result = await mammoth.extractRawText({ buffer: fileBuffer });
-  return result.value;
+  try {
+    const result = await mammoth.extractRawText({ buffer: fileBuffer });
+    return result.value;
+  } catch (error) {
+    console.error("Error parsing DOCX:", error);
+    throw new Error("Failed to parse DOCX file.");
+  }
 }
 
 async function performOcr(imageBuffer: Buffer): Promise<string> {
@@ -39,7 +74,7 @@ async function generateContentWithAI(
     return "Error: AI API key not configured.";
   }
 
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
   let prompt: string;
 
   switch (type) {
@@ -56,9 +91,14 @@ async function generateContentWithAI(
       throw new Error("Invalid generation type.");
   }
 
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
-  return response.text();
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error("AI generation error:", error);
+    throw new Error("Failed to generate content with AI.");
+  }
 }
 
 const MAX_FILE_SIZE_MB = 10;
@@ -107,55 +147,83 @@ export async function POST(req: NextRequest) {
     const fileName = file.name || "unnamed_file";
     const fileExtension = fileName.split(".").pop()?.toLowerCase();
 
-    if (fileType === "application/pdf" || fileExtension === "pdf") {
-      fileContent = await parsePdf(fileBuffer);
-      if (fileContent.length < 100 && fileBuffer.byteLength > 100 * 1024) {
+    console.log(
+      `Processing file: ${fileName}, Type: ${fileType}, Size: ${fileBuffer.length} bytes`
+    );
+
+    try {
+      if (fileType === "application/pdf" || fileExtension === "pdf") {
+        fileContent = await parsePdf(fileBuffer);
+        if (fileContent.length < 100 && fileBuffer.byteLength > 100 * 1024) {
+          return NextResponse.json(
+            {
+              message:
+                "This PDF appears to be a scanned document with minimal selectable text. Please ensure it is a searchable PDF or upload its pages as images for OCR.",
+            },
+            { status: 400 }
+          );
+        }
+      } else if (
+        fileType ===
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        fileExtension === "docx"
+      ) {
+        fileContent = await parseDocx(fileBuffer);
+      } else if (
+        fileType === "image/jpeg" ||
+        fileType === "image/png" ||
+        fileExtension === "jpg" ||
+        fileExtension === "jpeg" ||
+        fileExtension === "png"
+      ) {
+        fileContent = await performOcr(fileBuffer);
+        if (fileContent.length < 10 && fileBuffer.byteLength > 10 * 1024) {
+          return NextResponse.json(
+            {
+              message:
+                "Could not extract significant text from the image. Ensure the image contains clear text.",
+            },
+            { status: 400 }
+          );
+        }
+      } else if (
+        fileType.startsWith("text/") ||
+        ["txt", "md", "csv", "json", "log"].includes(fileExtension || "")
+      ) {
+        fileContent = fileBuffer.toString("utf8");
+      } else {
         return NextResponse.json(
           {
-            message:
-              "This PDF appears to be a scanned document with minimal selectable text. Please ensure it is a searchable PDF or upload its pages as images for OCR.",
+            message: `Unsupported file type: ${
+              fileType || fileExtension
+            }. Please upload PDF, DOCX, JPG, PNG, or text files.`,
           },
           { status: 400 }
         );
       }
-    } else if (
-      fileType ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      fileExtension === "docx"
-    ) {
-      fileContent = await parseDocx(fileBuffer);
-    } else if (
-      fileType === "image/jpeg" ||
-      fileType === "image/png" ||
-      fileExtension === "jpg" ||
-      fileExtension === "jpeg" ||
-      fileExtension === "png"
-    ) {
-      fileContent = await performOcr(fileBuffer);
-      if (fileContent.length < 10 && fileBuffer.byteLength > 10 * 1024) {
-        return NextResponse.json(
-          {
-            message:
-              "Could not extract significant text from the image. Ensure the image contains clear text.",
-          },
-          { status: 400 }
-        );
-      }
-    } else if (
-      fileType.startsWith("text/") ||
-      ["txt", "md", "csv", "json", "log"].includes(fileExtension || "")
-    ) {
-      fileContent = fileBuffer.toString("utf8");
-    } else {
+    } catch (parseError) {
+      console.error("File parsing error:", parseError);
       return NextResponse.json(
         {
-          message: `Unsupported file type: ${
-            fileType || fileExtension
-          }. Please upload PDF, DOCX, JPG, or PNG.`,
+          message: `Failed to process ${fileType || fileExtension} file: ${
+            parseError instanceof Error ? parseError.message : "Unknown error"
+          }`,
         },
         { status: 400 }
       );
     }
+
+    if (!fileContent || fileContent.trim().length === 0) {
+      return NextResponse.json(
+        {
+          message:
+            "No text content could be extracted from the file. Please ensure the file contains readable text.",
+        },
+        { status: 400 }
+      );
+    }
+
+    console.log(`Extracted ${fileContent.length} characters from file`);
 
     const blob = await put(fileName, fileBuffer, { access: "public" });
     const originalFileUrl = blob.url;
@@ -187,6 +255,7 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
+    console.error("API Error:", error);
     const errorMessage =
       error instanceof Error
         ? error.message

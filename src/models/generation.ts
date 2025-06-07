@@ -13,7 +13,8 @@ export interface IGeneration extends Document {
   generationType: GenerationType;
   userGivenName?: string;
   uploadDate: Date;
-  originalFileUrl: string; // NEW: Field to store the URL of the uploaded file
+  originalFileUrl: string;
+  userId: mongoose.Types.ObjectId;
 }
 
 const GenerationSchema: Schema = new Schema({
@@ -46,6 +47,7 @@ const GenerationSchema: Schema = new Schema({
     type: String,
     required: true,
   },
+  userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
 });
 
 const Generation =
