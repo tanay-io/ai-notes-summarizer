@@ -216,9 +216,11 @@ export default function UploadPage() {
                   <Sparkles className="h-6 w-6 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-                    AI Notes Summarizer
-                  </h1>
+                  <Link href="/">
+                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+                      AI Notes Summarizer
+                    </h1>
+                  </Link>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     Transform your documents into actionable insights
                   </p>
@@ -255,7 +257,7 @@ export default function UploadPage() {
               <CardHeader className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-800 dark:to-gray-900 rounded-t-xl border-b">
                 <CardTitle className="flex items-center space-x-2 text-gray-900 dark:text-white">
                   <ArrowUpCircle className="h-6 w-6" />
-                  <span>Upload & Generate Content</span>
+                  <span>Upload &amp; Generate Content</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-8">
@@ -516,7 +518,7 @@ export default function UploadPage() {
                                 onChange={(e) =>
                                   setUserGivenName(e.target.value)
                                 }
-                                placeholder="e.g., 'Summary of Q2 Report'"
+                                placeholder='e.g., "Summary of Q2 Report"'
                                 className="flex-1 border-blue-200 dark:border-blue-700 focus:border-blue-500 focus:ring-blue-500 rounded-xl"
                               />
                               <Button
