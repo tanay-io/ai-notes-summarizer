@@ -76,7 +76,7 @@ const getGenerationColor = (type: string) => {
 };
 
 export default function DashboardPage() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const router = useRouter();
 
   const [generations, setGenerations] = useState<IGenerationItem[]>([]);

@@ -89,7 +89,7 @@ export default function GenerationDetailPage() {
   const params = useParams();
   const id = params.id as string;
   const router = useRouter();
-  const { data: session, status } = useSession();
+  const { status } = useSession();
 
   const [generation, setGeneration] = useState<IGenerationDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);

@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { connectToDatabase } from "@/lib/mongodb";
 import Generation, { GenerationType } from "@/models/generation";
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { authOptions } from "@/lib/authoptions";
 
 async function parsePdf(fileBuffer: Buffer): Promise<string> {
   try {

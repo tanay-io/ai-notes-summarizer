@@ -2,14 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import Generation from "@/models/generation";
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../../auth/[...nextauth]/route";
+import { authOptions } from "@/lib/authoptions";
 
-interface Params {
-  id: string;
-}
-
-export async function PUT(req: NextRequest, { params }: { params: Params }) {
-  const { id } = params;
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params; // await the params Promise
   try {
     const session = await getServerSession(authOptions);
 
@@ -64,8 +63,11 @@ export async function PUT(req: NextRequest, { params }: { params: Params }) {
   }
 }
 
-export async function GET(req: NextRequest, { params }: { params: Params }) {
-  const { id } = params;
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params; // await the params Promise
   try {
     const session = await getServerSession(authOptions);
 
@@ -104,8 +106,11 @@ export async function GET(req: NextRequest, { params }: { params: Params }) {
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Params }) {
-  const { id } = params;
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params; // await the params Promise
   try {
     const session = await getServerSession(authOptions);
 

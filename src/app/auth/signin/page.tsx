@@ -32,7 +32,7 @@ export default function SignInPage() {
     setIsLoading(true);
 
     const result = await signIn("credentials", {
-      redirect: false, // Don't redirect automatically
+      redirect: false, 
       username,
       password,
     });
@@ -143,7 +143,7 @@ export default function SignInPage() {
 
             <div className="mt-8 text-center">
               <p className="text-gray-600 dark:text-gray-400">
-                Don't have an account?{" "}
+                Don&apos;t have an account?{" "}
                 <Link
                   href="/auth/signup"
                   className="font-medium text-blue-600 dark:text-blue-400 hover:underline"
