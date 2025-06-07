@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "./ThemeProvider"; // 👈 Import it here
+import { SessionProvider } from "./SessionProvider"; // IMPORT FROM YOUR CUSTOM CLIENT-SIDE PROVIDER!
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,7 +29,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white text-black dark:bg-zinc-900 dark:text-white transition-colors duration-300`}
       >
-        <ThemeProvider>{children}</ThemeProvider>
+        {/* Correct nesting: SessionProvider wraps everything that needs session */}
+        <SessionProvider>
+          {/* ThemeProvider also wraps the children within the session context */}
+          <ThemeProvider>{children}</ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   );

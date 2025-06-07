@@ -3,9 +3,12 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import mammoth from "mammoth";
 import { createWorker } from "tesseract.js";
 import { put } from "@vercel/blob";
+import { v4 as uuidv4 } from "uuid";
 
 import { connectToDatabase } from "@/lib/mongodb";
 import Generation, { GenerationType } from "@/models/generation";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]/route";
 
 async function parsePdf(fileBuffer: Buffer): Promise<string> {
   try {
@@ -14,7 +17,6 @@ async function parsePdf(fileBuffer: Buffer): Promise<string> {
     return data.text;
   } catch (error) {
     console.error("Error parsing PDF with pdf-parse:", error);
-
     try {
       const textContent = await extractPdfTextFallback(fileBuffer);
       return textContent;
@@ -28,18 +30,14 @@ async function parsePdf(fileBuffer: Buffer): Promise<string> {
 }
 
 async function extractPdfTextFallback(fileBuffer: Buffer): Promise<string> {
-  
   const text = fileBuffer.toString("utf8");
-
   const cleanedText = text
-    .replace(/[^\x20-\x7E\n\r\t]/g, " ") 
-    .replace(/\s+/g, " ") 
+    .replace(/[^\x20-\x7E\n\r\t]/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
-
   if (cleanedText.length < 50) {
     throw new Error("Could not extract meaningful text from PDF");
   }
-
   return cleanedText;
 }
 
@@ -106,6 +104,12 @@ const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session || !session.user || !session.user.id) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    const userId = session.user.id;
+
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const generationType = formData.get("generationType") as GenerationType;
@@ -144,11 +148,11 @@ export async function POST(req: NextRequest) {
     let fileContent = "";
 
     const fileType = file.type;
-    const fileName = file.name || "unnamed_file";
-    const fileExtension = fileName.split(".").pop()?.toLowerCase();
+    const originalFileName = file.name || "unnamed_file";
+    const fileExtension = originalFileName.split(".").pop()?.toLowerCase();
 
     console.log(
-      `Processing file: ${fileName}, Type: ${fileType}, Size: ${fileBuffer.length} bytes`
+      `Processing file: ${originalFileName}, Type: ${fileType}, Size: ${fileBuffer.length} bytes`
     );
 
     try {
@@ -225,7 +229,13 @@ export async function POST(req: NextRequest) {
 
     console.log(`Extracted ${fileContent.length} characters from file`);
 
-    const blob = await put(fileName, fileBuffer, { access: "public" });
+    const uniqueId = uuidv4();
+    const blobFileName = `${originalFileName.substring(
+      0,
+      originalFileName.lastIndexOf(".")
+    )}_${uniqueId}${fileExtension ? "." + fileExtension : ""}`;
+
+    const blob = await put(blobFileName, fileBuffer, { access: "public" });
     const originalFileUrl = blob.url;
 
     await connectToDatabase();
@@ -238,10 +248,11 @@ export async function POST(req: NextRequest) {
     const newGeneration = new Generation({
       originalContent: fileContent,
       generatedContent,
-      fileName,
+      fileName: originalFileName,
       generationType,
       uploadDate: new Date(),
       originalFileUrl,
+      userId: userId,
     });
 
     await newGeneration.save();
