@@ -4,11 +4,64 @@ import mammoth from "mammoth";
 import { createWorker } from "tesseract.js";
 import { put } from "@vercel/blob";
 import { v4 as uuidv4 } from "uuid";
+import fs from "node:fs";
+import path from "node:path";
 
 import { connectToDatabase } from "@/lib/mongodb";
 import Generation, { GenerationType } from "@/models/generation";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/authoptions";
+
+const sanitizeEnv = (value?: string) =>
+  String(value || "")
+    .replace(/^\s*"|"\s*$/g, "")
+    .trim();
+
+type ResolvedEnv = {
+  value: string;
+  source: ".env.local" | ".env" | "process.env" | "unset";
+};
+
+function readEnvVarFromFile(
+  fileName: ".env.local" | ".env",
+  varName: string,
+): string {
+  try {
+    const fullPath = path.join(process.cwd(), fileName);
+    if (!fs.existsSync(fullPath)) return "";
+
+    const content = fs.readFileSync(fullPath, "utf8");
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+
+      const equalIndex = trimmed.indexOf("=");
+      if (equalIndex < 0) continue;
+
+      const key = trimmed.slice(0, equalIndex).trim();
+      if (key !== varName) continue;
+
+      const rawValue = trimmed.slice(equalIndex + 1).trim();
+      return sanitizeEnv(rawValue);
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveEnv(varName: string): ResolvedEnv {
+  const fromLocal = readEnvVarFromFile(".env.local", varName);
+  if (fromLocal) return { value: fromLocal, source: ".env.local" };
+
+  const fromEnv = readEnvVarFromFile(".env", varName);
+  if (fromEnv) return { value: fromEnv, source: ".env" };
+
+  const fromProcess = sanitizeEnv(process.env[varName]);
+  if (fromProcess) return { value: fromProcess, source: "process.env" };
+
+  return { value: "", source: "unset" };
+}
 
 async function parsePdf(fileBuffer: Buffer): Promise<string> {
   try {
@@ -23,7 +76,7 @@ async function parsePdf(fileBuffer: Buffer): Promise<string> {
     } catch (fallbackError) {
       console.error("Fallback PDF parsing also failed:", fallbackError);
       throw new Error(
-        "Failed to parse PDF file. Please ensure it contains selectable text or try uploading as images."
+        "Failed to parse PDF file. Please ensure it contains selectable text or try uploading as images.",
       );
     }
   }
@@ -65,14 +118,74 @@ async function performOcr(imageBuffer: Buffer): Promise<string> {
 
 async function generateContentWithAI(
   text: string,
-  type: GenerationType
+  type: GenerationType,
 ): Promise<string> {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-  if (!process.env.GEMINI_API_KEY) {
-    return "Error: AI API key not configured.";
+  const normalizeModelId = (value: string): string => {
+    const trimmed = value.replace(/^\s*"|"\s*$/g, "").trim();
+    const normalized = trimmed.toLowerCase().replace(/\s+/g, " ").trim();
+
+    const aliases: Record<string, string> = {
+      "gemini 2.5 flash": "gemini-2.5-flash",
+      "gemini 2.5 pro": "gemini-2.5-pro",
+      "gemini 1.5 flash": "gemini-1.5-flash",
+      "gemini 1.5 pro": "gemini-1.5-pro",
+    };
+
+    if (aliases[normalized]) {
+      return aliases[normalized];
+    }
+
+    return normalized
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+  };
+
+  // Prefer .env.local/.env values to avoid stale shell-level env overrides.
+  const geminiApiKeyResolved = resolveEnv("GEMINI_API_KEY");
+  const googleApiKeyResolved = resolveEnv("GOOGLE_API_KEY");
+
+  const geminiApiKey = geminiApiKeyResolved.value;
+  const googleApiKey = googleApiKeyResolved.value;
+
+  const primaryApiKey = geminiApiKey || googleApiKey;
+  const fallbackApiKey =
+    geminiApiKey && googleApiKey && geminiApiKey !== googleApiKey
+      ? googleApiKey
+      : "";
+
+  const primarySource = geminiApiKey
+    ? `GEMINI_API_KEY(${geminiApiKeyResolved.source})`
+    : `GOOGLE_API_KEY(${googleApiKeyResolved.source})`;
+
+  const mask = (value: string) => (value ? `****${value.slice(-4)}` : "unset");
+  console.log(
+    "AI key selection:",
+    `gemini=${mask(geminiApiKey)} from ${geminiApiKeyResolved.source};`,
+    `google=${mask(googleApiKey)} from ${googleApiKeyResolved.source};`,
+    `using=${primarySource}`,
+  );
+
+  if (!primaryApiKey) {
+    throw new Error(
+      "AI API key not configured. Set GOOGLE_API_KEY or GEMINI_API_KEY in your environment.",
+    );
   }
 
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
+  const generativeModelResolved = resolveEnv("GENERATIVE_MODEL");
+  const geminiModelResolved = resolveEnv("GEMINI_MODEL");
+  const rawModelId =
+    generativeModelResolved.value ||
+    geminiModelResolved.value ||
+    "gemini-2.5-flash";
+  const modelId = normalizeModelId(String(rawModelId));
+  const modelSource = generativeModelResolved.value
+    ? `GENERATIVE_MODEL(${generativeModelResolved.source})`
+    : geminiModelResolved.value
+      ? `GEMINI_MODEL(${geminiModelResolved.source})`
+      : "default";
+  console.log("AI model id:", modelId, `source=${modelSource}`);
+
   let prompt: string;
 
   switch (type) {
@@ -89,13 +202,108 @@ async function generateContentWithAI(
       throw new Error("Invalid generation type.");
   }
 
-  try {
+  const generateWithKey = async (apiKey: string) => {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: modelId });
     const result = await model.generateContent(prompt);
     const response = await result.response;
     return response.text();
+  };
+
+  const sleep = (ms: number) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
+  const isTransientModelBusyError = (errorText: string) =>
+    /\[503 Service Unavailable\]|currently experiencing high demand|spikes in demand|try again later/i.test(
+      errorText,
+    );
+
+  const generateWithRetry = async (apiKey: string) => {
+    const delaysMs = [0, 600, 1400];
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < delaysMs.length; attempt++) {
+      if (delaysMs[attempt] > 0) {
+        await sleep(delaysMs[attempt]);
+      }
+
+      try {
+        return await generateWithKey(apiKey);
+      } catch (error) {
+        const errorText = error instanceof Error ? error.message : String(error);
+        lastError = error;
+
+        if (isTransientModelBusyError(errorText) && attempt < delaysMs.length - 1) {
+          console.warn(
+            `AI model busy, retrying attempt ${attempt + 2}/${delaysMs.length}...`,
+          );
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(String(lastError));
+  };
+
+  try {
+    return await generateWithRetry(primaryApiKey);
   } catch (error) {
     console.error("AI generation error:", error);
-    throw new Error("Failed to generate content with AI.");
+
+    const errorText = error instanceof Error ? error.message : String(error);
+    if (
+      /API_KEY_INVALID|API Key not found/i.test(errorText) &&
+      fallbackApiKey
+    ) {
+      try {
+        console.warn(
+          "Primary API key rejected; retrying with alternate configured key.",
+        );
+        return await generateWithRetry(fallbackApiKey);
+      } catch (retryError) {
+        const retryText =
+          retryError instanceof Error ? retryError.message : String(retryError);
+        if (isTransientModelBusyError(retryText)) {
+          throw new Error(
+            "AI_MODEL_BUSY: Gemini model is temporarily overloaded due to high demand. Please retry shortly.",
+          );
+        }
+        if (/API_KEY_INVALID|API Key not found/i.test(retryText)) {
+          throw new Error(
+            "AI_API_KEY_INVALID: The configured Gemini API key is invalid, revoked, or restricted for this project.",
+          );
+        }
+        throw new Error(`AI generation failed: ${retryText}`);
+      }
+    }
+
+    if (/API_KEY_INVALID|API Key not found/i.test(errorText)) {
+      throw new Error(
+        "AI_API_KEY_INVALID: The configured Gemini API key is invalid, revoked, or restricted for this project.",
+      );
+    }
+
+    if (isTransientModelBusyError(errorText)) {
+      throw new Error(
+        "AI_MODEL_BUSY: Gemini model is temporarily overloaded due to high demand. Please retry shortly.",
+      );
+    }
+
+    if (
+      /unexpected model name format|GenerateContentRequest\.model/i.test(errorText)
+    ) {
+      throw new Error(
+        "AI_MODEL_INVALID: Invalid model id format. Use model ids like gemini-2.5-flash.",
+      );
+    }
+
+    throw new Error(`AI generation failed: ${errorText}`);
   }
 }
 
@@ -117,7 +325,7 @@ export async function POST(req: NextRequest) {
     if (!file) {
       return NextResponse.json(
         { message: "No file uploaded." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -126,21 +334,21 @@ export async function POST(req: NextRequest) {
         {
           message: `File size exceeds the limit of ${MAX_FILE_SIZE_MB}MB. Please upload a smaller file.`,
         },
-        { status: 413 }
+        { status: 413 },
       );
     }
 
     if (!Object.values(GenerationType).includes(generationType)) {
       return NextResponse.json(
         { message: "Invalid generation type selected." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json(
         { message: "Server configuration error: Blob storage not available." },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -152,7 +360,7 @@ export async function POST(req: NextRequest) {
     const fileExtension = originalFileName.split(".").pop()?.toLowerCase();
 
     console.log(
-      `Processing file: ${originalFileName}, Type: ${fileType}, Size: ${fileBuffer.length} bytes`
+      `Processing file: ${originalFileName}, Type: ${fileType}, Size: ${fileBuffer.length} bytes`,
     );
 
     try {
@@ -164,7 +372,7 @@ export async function POST(req: NextRequest) {
               message:
                 "This PDF appears to be a scanned document with minimal selectable text. Please ensure it is a searchable PDF or upload its pages as images for OCR.",
             },
-            { status: 400 }
+            { status: 400 },
           );
         }
       } else if (
@@ -187,7 +395,7 @@ export async function POST(req: NextRequest) {
               message:
                 "Could not extract significant text from the image. Ensure the image contains clear text.",
             },
-            { status: 400 }
+            { status: 400 },
           );
         }
       } else if (
@@ -202,7 +410,7 @@ export async function POST(req: NextRequest) {
               fileType || fileExtension
             }. Please upload PDF, DOCX, JPG, PNG, or text files.`,
           },
-          { status: 400 }
+          { status: 400 },
         );
       }
     } catch (parseError) {
@@ -213,7 +421,7 @@ export async function POST(req: NextRequest) {
             parseError instanceof Error ? parseError.message : "Unknown error"
           }`,
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -223,7 +431,7 @@ export async function POST(req: NextRequest) {
           message:
             "No text content could be extracted from the file. Please ensure the file contains readable text.",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -232,7 +440,7 @@ export async function POST(req: NextRequest) {
     const uniqueId = uuidv4();
     const blobFileName = `${originalFileName.substring(
       0,
-      originalFileName.lastIndexOf(".")
+      originalFileName.lastIndexOf("."),
     )}_${uniqueId}${fileExtension ? "." + fileExtension : ""}`;
 
     const blob = await put(blobFileName, fileBuffer, { access: "public" });
@@ -242,7 +450,7 @@ export async function POST(req: NextRequest) {
 
     const generatedContent = await generateContentWithAI(
       fileContent,
-      generationType
+      generationType,
     );
 
     const newGeneration = new Generation({
@@ -263,7 +471,7 @@ export async function POST(req: NextRequest) {
         message: "Content generated and saved successfully!",
         id: newGeneration._id.toString(),
       },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (error) {
     console.error("API Error:", error);
@@ -271,9 +479,43 @@ export async function POST(req: NextRequest) {
       error instanceof Error
         ? error.message
         : "Something went wrong during processing.";
+
+    if (errorMessage.startsWith("AI_API_KEY_INVALID:")) {
+      return NextResponse.json(
+        {
+          message:
+            "Gemini API key is invalid for current project. Create a key in Google AI Studio and use it in GOOGLE_API_KEY or GEMINI_API_KEY.",
+          error: errorMessage,
+        },
+        { status: 401 },
+      );
+    }
+
+    if (errorMessage.startsWith("AI_MODEL_INVALID:")) {
+      return NextResponse.json(
+        {
+          message:
+            "Gemini model id is invalid. Set GEMINI_MODEL (or GENERATIVE_MODEL) to a valid id like gemini-2.5-flash.",
+          error: errorMessage,
+        },
+        { status: 400 },
+      );
+    }
+
+    if (errorMessage.startsWith("AI_MODEL_BUSY:")) {
+      return NextResponse.json(
+        {
+          message:
+            "Gemini model is currently experiencing high demand. Please retry in a few moments.",
+          error: errorMessage,
+        },
+        { status: 503 },
+      );
+    }
+
     return NextResponse.json(
       { message: errorMessage, error: errorMessage },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

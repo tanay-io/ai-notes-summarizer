@@ -1,22 +1,32 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { DM_Mono, DM_Sans, Instrument_Serif } from "next/font/google";
 import "./globals.css";
-import ThemeProvider from "./ThemeProvider"; 
-import { SessionProvider } from "./SessionProvider"; 
+import ThemeProvider from "./ThemeProvider";
+import { SessionProvider } from "./SessionProvider";
+import { PageTransition } from "@/components/layout/PageTransition";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-serif",
   subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const dmSans = DM_Sans({
+  variable: "--font-sans",
   subsets: ["latin"],
+  weight: ["300", "400", "500", "700"],
+});
+
+const dmMono = DM_Mono({
+  variable: "--font-mono",
+  subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
-  title: "AI Notes Summariser",
-  description: "Transform your documents into actionable insights",
+  title: "NoteWhiz",
+  description: "Document intelligence with warm editorial UX",
 };
 
 export default function RootLayout({
@@ -27,10 +37,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white text-black dark:bg-zinc-900 dark:text-white transition-colors duration-300`}
+        className={`${instrumentSerif.variable} ${dmSans.variable} ${dmMono.variable} antialiased bg-background text-foreground`}
       >
         <SessionProvider>
-          <ThemeProvider>{children}</ThemeProvider>
+          <ThemeProvider>
+            <PageTransition>{children}</PageTransition>
+          </ThemeProvider>
         </SessionProvider>
       </body>
     </html>

@@ -1,184 +1,149 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Label } from "@/components/ui/label";
+import { FormEvent, useState } from "react";
 import Link from "next/link";
-import {
-  CheckCircle,
-  AlertCircle,
-  UserPlus,
-  Lock,
-  ArrowRight,
-  Loader2,
-} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowRight, Loader2 } from "lucide-react";
 
 export default function SignUpPage() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setError(null);
-    setSuccess(null);
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const res = await fetch("/api/auth/signup", {
+      const response = await fetch("/api/auth/signup", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
 
-      const data = await res.json();
+      const data = await response.json();
 
-      if (!res.ok) {
-        throw new Error(data.message || "Failed to sign up.");
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to create account.");
       }
 
-      setSuccess(
-        data.message || "Account created successfully! Please sign in."
+      router.push("/auth/signin");
+    } catch (submissionError) {
+      setError(
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Something went wrong."
       );
-      setTimeout(() => {
-        router.push("/auth/signin");
-      }, 1500);
-    } catch (err) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("An unexpected error occurred.");
-      }
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-800 transition-colors duration-300 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <Card className="border-0 shadow-xl bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm">
-          <CardHeader className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-800 dark:to-gray-900 rounded-t-xl border-b">
-            <div className="flex flex-col items-center space-y-2">
-              <div className="p-3 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl shadow-lg">
-                <UserPlus className="h-6 w-6 text-white" />
-              </div>
-              <CardTitle className="text-2xl font-bold text-gray-900 dark:text-white">
-                Create an Account
-              </CardTitle>
-              <CardDescription className="text-gray-500 dark:text-gray-400 text-center">
-                Sign up to access AI-powered document analysis and more
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="p-8">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-2">
-                <Label
-                  htmlFor="username"
-                  className="text-gray-700 dark:text-gray-300"
-                >
-                  Username
-                </Label>
-                <div className="relative">
-                  <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
-                  <Input
-                    id="username"
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    required
-                    placeholder="Enter your username"
-                    className="pl-10 rounded-xl border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label
-                  htmlFor="password"
-                  className="text-gray-700 dark:text-gray-300"
-                >
-                  Password
-                </Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    placeholder="Create a secure password"
-                    className="pl-10 rounded-xl border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
+    <div className="min-h-screen bg-[#FAF8F4] p-4 md:p-10">
+      <div className="mx-auto grid min-h-[580px] w-full max-w-[1100px] overflow-hidden rounded-xl border border-[#E8E1D6] bg-white md:grid-cols-2">
+        <aside className="relative hidden bg-[#0F0E0C] p-10 text-[#FAF8F4] md:block">
+          <div className="absolute inset-0 opacity-20">
+            <div className="absolute left-[-80px] top-[-60px] h-56 w-56 rounded-full bg-white/10" />
+            <div className="absolute bottom-[-60px] right-[-30px] h-52 w-52 rounded-full bg-white/10" />
+          </div>
+
+          <div className="relative z-10">
+            <p className="text-xl"><span className="font-serif italic">Note</span><span className="font-serif text-[#E8952F]">Whiz</span></p>
+            <h1 className="mt-10 font-serif text-5xl leading-tight">Start learning faster.</h1>
+            <p className="mt-4 max-w-sm text-white/70">
+              Build your generation history and keep every important insight in
+              one calm, structured workspace.
+            </p>
+
+            <ul className="mt-8 space-y-3 text-sm text-white/75">
+              <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#E8952F]" /> Upload once, revisit anytime</li>
+              <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#E8952F]" /> Rename and organize generations</li>
+              <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#E8952F]" /> Keep original files linked</li>
+            </ul>
+          </div>
+        </aside>
+
+        <section className="flex items-center justify-center bg-[#FAF8F4] p-8 md:p-12">
+          <div className="w-full max-w-[360px]">
+            <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-[#C97C2A]">Sign up</p>
+            <h2 className="mt-2 font-serif text-4xl">Create account</h2>
+            <p className="mt-2 text-sm text-[#7A756A]">It takes less than a minute.</p>
+
+            <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+              <div>
+                <label htmlFor="username" className="mb-1 block text-sm text-[#3A3832]">Username</label>
+                <input
+                  id="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  required
+                  className="w-full rounded-lg border border-[#E8E1D6] bg-white px-3 py-2.5 text-sm text-[#0F0E0C] placeholder:text-[#B5B0A5] outline-none transition focus:border-[#C97C2A] focus:ring-2 focus:ring-[#C97C2A]/20"
+                />
               </div>
 
-              {error && (
-                <Alert className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/50">
-                  <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-                  <AlertDescription className="text-red-700 dark:text-red-300 font-medium">
-                    {error}
-                  </AlertDescription>
-                </Alert>
-              )}
+              <div>
+                <label htmlFor="password" className="mb-1 block text-sm text-[#3A3832]">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  className="w-full rounded-lg border border-[#E8E1D6] bg-white px-3 py-2.5 text-sm text-[#0F0E0C] placeholder:text-[#B5B0A5] outline-none transition focus:border-[#C97C2A] focus:ring-2 focus:ring-[#C97C2A]/20"
+                />
+                <p className="mt-1 text-xs text-[#B5B0A5]">At least 8 characters recommended.</p>
+              </div>
 
-              {success && (
-                <Alert className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/50">
-                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                  <AlertDescription className="text-green-700 dark:text-green-300 font-medium">
-                    {success}
-                  </AlertDescription>
-                </Alert>
-              )}
+              <div>
+                <label htmlFor="confirmPassword" className="mb-1 block text-sm text-[#3A3832]">Confirm password</label>
+                <input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                  className="w-full rounded-lg border border-[#E8E1D6] bg-white px-3 py-2.5 text-sm text-[#0F0E0C] placeholder:text-[#B5B0A5] outline-none transition focus:border-[#C97C2A] focus:ring-2 focus:ring-[#C97C2A]/20"
+                />
+              </div>
 
-              <Button
-                type="submit"
+              {error && <div className="error-callout">{error}</div>}
+
+              <button
                 disabled={isLoading}
-                className="w-full h-12 text-lg font-semibold rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#0F0E0C] px-4 py-3 text-sm text-[#FAF8F4] transition hover:bg-[#3A3832] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isLoading ? (
-                  <div className="flex items-center space-x-2">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    <span>Creating Account...</span>
-                  </div>
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Creating account...
+                  </>
                 ) : (
-                  <div className="flex items-center space-x-2">
-                    <span>Create Account</span>
-                    <ArrowRight className="h-5 w-5" />
-                  </div>
+                  <>
+                    Create account <ArrowRight className="h-4 w-4" />
+                  </>
                 )}
-              </Button>
+              </button>
             </form>
 
-            <div className="mt-8 text-center">
-              <p className="text-gray-600 dark:text-gray-400">
-                Already have an account?{" "}
-                <Link
-                  href="/auth/signin"
-                  className="font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  Sign In
-                </Link>
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+            <p className="mt-6 text-sm text-[#7A756A]">
+              Already have an account?{" "}
+              <Link href="/auth/signin" className="text-[#C97C2A] hover:underline">
+                Sign in
+              </Link>
+            </p>
+          </div>
+        </section>
       </div>
     </div>
   );

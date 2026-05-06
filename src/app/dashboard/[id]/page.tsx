@@ -1,323 +1,241 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { format } from "date-fns";
+import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  FileText,
-  Brain,
-  Target,
-  ChevronLeft,
-  AlertCircle,
-  Loader2,
-  Calendar,
-  Download,
+  ArrowLeft,
   Copy,
-  CheckCircle,
-  File,
+  ExternalLink,
+  Loader2,
+  Save,
+  Trash2,
 } from "lucide-react";
+import { AppShell } from "@/components/layout/AppShell";
+import { TypeBadge } from "@/components/common/TypeBadge";
 
-interface IGenerationDetail {
+type GenerationType = "summary" | "flashcards" | "key_points";
+
+type GenerationDetail = {
   _id: string;
-  originalContent: string;
   generatedContent: string;
+  originalContent: string;
   fileName: string;
-  generationType: string;
+  generationType: GenerationType;
   userGivenName?: string;
   uploadDate: string;
-  originalFileUrl: string;
-  userId: string;
-}
-
-// Helper function to get icon based on generation type
-const getGenerationIcon = (type: string) => {
-  switch (type.toLowerCase()) {
-    case "summary":
-      return FileText;
-    case "flashcards":
-      return Brain;
-    case "key_points":
-      return Target;
-    default:
-      return FileText;
-  }
-};
-
-// Helper function to get color based on generation type
-const getGenerationColor = (type: string) => {
-  switch (type.toLowerCase()) {
-    case "summary":
-      return {
-        bg: "bg-blue-50 dark:bg-blue-950/50",
-        border: "border-blue-200 dark:border-blue-800",
-        text: "text-blue-700 dark:text-blue-300",
-        gradient: "from-blue-500 to-cyan-500",
-      };
-    case "flashcards":
-      return {
-        bg: "bg-purple-50 dark:bg-purple-950/50",
-        border: "border-purple-200 dark:border-purple-800",
-        text: "text-purple-700 dark:text-purple-300",
-        gradient: "from-purple-500 to-pink-500",
-      };
-    case "key_points":
-      return {
-        bg: "bg-green-50 dark:bg-green-950/50",
-        border: "border-green-200 dark:border-green-800",
-        text: "text-green-700 dark:text-green-300",
-        gradient: "from-green-500 to-emerald-500",
-      };
-    default:
-      return {
-        bg: "bg-gray-50 dark:bg-gray-900/50",
-        border: "border-gray-200 dark:border-gray-700",
-        text: "text-gray-700 dark:text-gray-300",
-        gradient: "from-gray-500 to-slate-500",
-      };
-  }
+  originalFileUrl?: string;
 };
 
 export default function GenerationDetailPage() {
-  const params = useParams();
-  const id = params.id as string;
+  const params = useParams<{ id: string }>();
   const router = useRouter();
   const { status } = useSession();
 
-  const [generation, setGeneration] = useState<IGenerationDetail | null>(null);
+  const [item, setItem] = useState<GenerationDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [name, setName] = useState("");
 
   useEffect(() => {
-    // Redirect if not authenticated
     if (status === "unauthenticated") {
       router.push("/auth/signin");
       return;
     }
 
-    if (!id || status !== "authenticated") return;
+    if (status !== "authenticated") return;
 
-    async function fetchGenerationDetails() {
+    const load = async () => {
       setIsLoading(true);
       setError(null);
+
       try {
-        const res = await fetch(`/api/generations/${id}`);
-        if (!res.ok) {
-          if (res.status === 403) {
-            throw new Error(
-              "You do not have permission to view this generation."
-            );
-          }
-          throw new Error("Failed to fetch generation details.");
+        const response = await fetch(`/api/generations/${params.id}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.message || "Failed to fetch generation.");
         }
-        const data = await res.json();
-        setGeneration(data.generation);
-      } catch (err) {
-        console.error("Error fetching generation details:", err);
+
+        setItem(data.generation);
+        setName(data.generation.userGivenName || "");
+      } catch (fetchError) {
         setError(
-          err instanceof Error ? err.message : "An unexpected error occurred."
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Unable to load generation details."
         );
       } finally {
         setIsLoading(false);
       }
-    }
+    };
 
-    fetchGenerationDetails();
-  }, [id, status, router]);
+    load();
+  }, [params.id, router, status]);
 
-  const copyToClipboard = async () => {
-    if (!generation) return;
+  const formattedDate = useMemo(() => {
+    if (!item) return "";
+    return new Date(item.uploadDate).toLocaleString();
+  }, [item]);
+
+  const handleSaveName = async () => {
+    if (!item) return;
+
+    setIsSaving(true);
+    setError(null);
 
     try {
-      await navigator.clipboard.writeText(generation.generatedContent);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy text:", err);
+      const response = await fetch(`/api/generations/${item._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userGivenName: name.trim() || "Untitled" }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to update name.");
+      }
+
+      setItem(data.generation);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Save failed.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!item) return;
+
+    await navigator.clipboard.writeText(item.generatedContent);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  };
+
+  const handleDelete = async () => {
+    if (!item) return;
+
+    const confirmed = window.confirm(
+      "Delete this generation? This action cannot be undone."
+    );
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/generations/${item._id}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Delete failed.");
+      }
+
+      router.push("/dashboard");
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error ? deleteError.message : "Unable to delete"
+      );
     }
   };
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-800 transition-colors duration-300 flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <Loader2 className="h-12 w-12 text-blue-600 dark:text-blue-400 animate-spin" />
-          <p className="text-xl font-medium text-gray-900 dark:text-white">
-            Loading session...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "unauthenticated") {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-800 transition-colors duration-300 flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <AlertCircle className="h-12 w-12 text-red-600 dark:text-red-400" />
-          <p className="text-xl font-medium text-red-600 dark:text-red-400">
-            Redirecting to login...
-          </p>
-        </div>
+      <div className="grid min-h-screen place-items-center bg-[#FAF8F4] text-[#7A756A]">
+        Loading session...
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-800 transition-colors duration-300">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="max-w-4xl mx-auto space-y-6">
-          {/* Back Button */}
-          <Link href="/dashboard" passHref>
-            <Button
-              variant="outline"
-              className="rounded-xl border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 shadow-sm"
-            >
-              <ChevronLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
+    <AppShell>
+      <div className="px-4 py-8 md:px-8">
+        <div className="mx-auto w-full max-w-[760px]">
+          <Link
+            href="/dashboard"
+            className="mb-5 inline-flex items-center gap-2 rounded-lg border border-[#E8E1D6] bg-white px-3 py-2 text-sm text-[#3A3832] transition hover:border-[#B5B0A5]"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            All generations
           </Link>
 
-          {/* Loading State */}
-          {isLoading && (
-            <Card className="border-0 shadow-xl bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm">
-              <CardHeader>
-                <Skeleton className="h-8 w-3/4 rounded-lg" />
-                <div className="space-y-3 mt-4">
-                  <Skeleton className="h-4 w-1/2 rounded-lg" />
-                  <Skeleton className="h-4 w-2/3 rounded-lg" />
-                  <Skeleton className="h-4 w-1/3 rounded-lg" />
+          {isLoading ? (
+            <div className="skeleton-shimmer h-[340px] rounded-xl border border-[#E8E1D6]" />
+          ) : error ? (
+            <div className="error-callout">{error}</div>
+          ) : item ? (
+            <div className="rounded-xl border border-[#E8E1D6] bg-white">
+              <header className="space-y-4 border-b border-[#E8E1D6] bg-[#F2EDE6] px-5 py-5">
+                <div className="flex items-center gap-3">
+                  <TypeBadge type={item.generationType} />
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    className="w-full border-b border-transparent bg-transparent pb-1 font-serif text-[1.65rem] text-[#0F0E0C] outline-none transition focus:border-[#C97C2A]"
+                    placeholder="Untitled generation"
+                  />
+                  <button
+                    onClick={handleSaveName}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-1 rounded-lg border border-[#E8E1D6] bg-white px-3 py-2 text-xs text-[#3A3832] transition hover:border-[#B5B0A5] disabled:opacity-60"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Save className="h-3.5 w-3.5" />
+                    )}
+                    Save
+                  </button>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-[300px] w-full rounded-lg" />
-              </CardContent>
-            </Card>
-          )}
 
-          {/* Error State */}
-          {error && !isLoading && (
-            <Alert className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/50">
-              <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-              <AlertDescription className="text-red-700 dark:text-red-300 font-medium">
-                {error}
-              </AlertDescription>
-            </Alert>
-          )}
+                <div className="flex flex-wrap items-center gap-4 font-mono text-[11px] uppercase tracking-[0.08em] text-[#B5B0A5]">
+                  <span>{item.fileName}</span>
+                  <span>{formattedDate}</span>
+                  <span>{item.generationType}</span>
+                </div>
+              </header>
 
-          {/* Generation Detail */}
-          {!isLoading && !error && generation && (
-            <Card className="border-0 shadow-xl bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm">
-              {(() => {
-                const Icon = getGenerationIcon(generation.generationType);
-                const colors = getGenerationColor(generation.generationType);
+              <section className="p-5">
+                <div className="rounded-lg border border-[#E8E1D6] bg-[#FAF8F4] p-6 text-[0.9375rem] leading-[1.8] text-[#3A3832]">
+                  {item.generatedContent}
+                </div>
 
-                return (
-                  <>
-                    <CardHeader
-                      className={`${colors.bg} rounded-t-xl border-b ${colors.border}`}
+                <div className="mt-5 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleCopy}
+                    className="inline-flex items-center gap-2 rounded-lg border border-[#E8E1D6] bg-white px-3 py-2 text-sm text-[#3A3832] transition hover:border-[#B5B0A5]"
+                  >
+                    <Copy className="h-4 w-4" />
+                    {copied ? "Copied" : "Copy text"}
+                  </button>
+
+                  {item.originalFileUrl && (
+                    <a
+                      href={item.originalFileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg border border-[#E8E1D6] bg-white px-3 py-2 text-sm text-[#3A3832] transition hover:border-[#B5B0A5]"
                     >
-                      <div className="flex items-center space-x-3 mb-4">
-                        <div className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm">
-                          <Icon className={`h-6 w-6 ${colors.text}`} />
-                        </div>
-                        <CardTitle className="text-2xl text-gray-900 dark:text-white">
-                          {generation.userGivenName ||
-                            `Generated ${generation.generationType}`}
-                        </CardTitle>
-                      </div>
+                      <ExternalLink className="h-4 w-4" />
+                      View source file
+                    </a>
+                  )}
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <div className="flex items-center space-x-2">
-                            <Badge
-                              className={`${colors.bg} ${colors.border} ${colors.text} capitalize`}
-                            >
-                              {generation.generationType}
-                            </Badge>
-                          </div>
-                          <p className="text-sm text-gray-700 dark:text-gray-300 flex items-center">
-                            <File className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />
-                            <span className="truncate">
-                              {generation.fileName}
-                            </span>
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center">
-                            <Calendar className="h-3 w-3 mr-2" />
-                            {format(
-                              new Date(generation.uploadDate),
-                              "MMMM dd, yyyy 'at' HH:mm"
-                            )}
-                          </p>
-                        </div>
-
-                        {generation.originalFileUrl && (
-                          <div className="flex items-center justify-end">
-                            <a
-                              href={generation.originalFileUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              <Button
-                                className={`rounded-xl bg-gradient-to-r ${colors.gradient} text-white shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.02]`}
-                              >
-                                <Download className="h-4 w-4 mr-2" />
-                                View Original File
-                              </Button>
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    </CardHeader>
-
-                    <CardContent className="p-8 space-y-6">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-                            Generated Content
-                          </h3>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={copyToClipboard}
-                            className="rounded-lg"
-                          >
-                            {copied ? (
-                              <>
-                                <CheckCircle className="h-4 w-4 mr-2 text-green-600 dark:text-green-400" />
-                                Copied!
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-4 w-4 mr-2" />
-                                Copy Text
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                        <Textarea
-                          readOnly
-                          value={generation.generatedContent}
-                          rows={12}
-                          className="w-full font-mono text-sm resize-none border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-blue-500 rounded-xl bg-gray-50 dark:bg-gray-800"
-                        />
-                      </div>
-                    </CardContent>
-                  </>
-                );
-              })()}
-            </Card>
-          )}
+                  <button
+                    onClick={handleDelete}
+                    className="ml-auto inline-flex items-center gap-2 rounded-lg border border-[#f0bdbd] bg-[#FCEBEB] px-3 py-2 text-sm text-[#A32D2D] transition hover:bg-[#f8dede]"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
+                  </button>
+                </div>
+              </section>
+            </div>
+          ) : null}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
