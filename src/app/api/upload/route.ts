@@ -6,11 +6,14 @@ import { put } from "@vercel/blob";
 import { v4 as uuidv4 } from "uuid";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 
 import { connectToDatabase } from "@/lib/mongodb";
 import Generation, { GenerationType } from "@/models/generation";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/authoptions";
+
+const require = createRequire(import.meta.url);
 
 const sanitizeEnv = (value?: string) =>
   String(value || "")
@@ -105,7 +108,10 @@ async function parseDocx(fileBuffer: Buffer): Promise<string> {
 }
 
 async function performOcr(imageBuffer: Buffer): Promise<string> {
-  const worker = await createWorker("eng");
+  const workerPath =
+    require.resolve("tesseract.js/src/worker-script/node/index.js");
+
+  const worker = await createWorker("eng", 1, { workerPath });
   try {
     const {
       data: { text },
@@ -232,10 +238,14 @@ async function generateContentWithAI(
       try {
         return await generateWithKey(apiKey);
       } catch (error) {
-        const errorText = error instanceof Error ? error.message : String(error);
+        const errorText =
+          error instanceof Error ? error.message : String(error);
         lastError = error;
 
-        if (isTransientModelBusyError(errorText) && attempt < delaysMs.length - 1) {
+        if (
+          isTransientModelBusyError(errorText) &&
+          attempt < delaysMs.length - 1
+        ) {
           console.warn(
             `AI model busy, retrying attempt ${attempt + 2}/${delaysMs.length}...`,
           );
@@ -246,9 +256,7 @@ async function generateContentWithAI(
       }
     }
 
-    throw lastError instanceof Error
-      ? lastError
-      : new Error(String(lastError));
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   };
 
   try {
@@ -296,7 +304,9 @@ async function generateContentWithAI(
     }
 
     if (
-      /unexpected model name format|GenerateContentRequest\.model/i.test(errorText)
+      /unexpected model name format|GenerateContentRequest\.model/i.test(
+        errorText,
+      )
     ) {
       throw new Error(
         "AI_MODEL_INVALID: Invalid model id format. Use model ids like gemini-2.5-flash.",
